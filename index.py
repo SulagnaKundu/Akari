@@ -1,77 +1,51 @@
-from fastapi import FastAPI
-import os
-from fastapi import Request
+from flask import Flask, request, jsonify
 import requests
-import sys
-import uvicorn
+import openai
+import os
+from flask_cors import CORS
 
-app = FastAPI()
+app = Flask(__name__)
+CORS(app)
 
-convo = []
-@app.post('/dialogflow')
-async def webhook(request: Request):
-    try:
-        req = await request.json()
-        # print('request data', req)
-        fulfillmentText = 'you said'
-        query_result = req.get('queryResult')
-        query = query_result.get('queryText')
-        
-        if query_result.get('action') == 'input.unknown':
-            convo.append('User:' + query)
-            convo.append("SAM:")
-            prompt = ("\n").join(convo)
-            # print('prompt so far', convo)
-            response = query_gpt(prompt)
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    req = request.get_json(silent=True, force=True)
+    query = req.get('queryResult', {}).get('queryText', '')
 
-            # print('gpt resp', response)
-            result = response.get('choices')[0].get('text')
-            result = result.strip('\n')
-            # print('result', result)
-            convo.append(result)
-            print('convo so far', ("\n").join(convo))
+    if "define" in query.lower() or len(query.split()) < 5:
+        result = google_search(query)
+    else:
+        result = chatgpt_response(query)
 
-            return {
-            "fulfillmentText": result,
-            "source":
-            "webhookdata"
-        }
-          
-        if query_result.get('action') == 'welcome':
-          print('prompt initialized')
-          # convo = []
-          convo.append('''The following is a conversation with an AI assistant that can have meaningful conversations with users. The assistant is helpful, empathic, and friendly.
-        AI: Hey ! This is Akari, your virtual query assistant. How can I help you ?''')
-
-    except Exception as e:
-        print('error',e)
-        exc_type, exc_obj, exc_tb = sys.exc_info()
-        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        print('oops',exc_type, fname, exc_tb.tb_lineno)
-        return 400
-
-def query_gpt(prompt):
-    body = {
-        "model": "text-davinci-003",
-        "prompt": prompt,
-        "max_tokens": 150,
-        "temperature": 0.7,
-        "top_p": 1,
-        "n": 1,
-        "frequency_penalty":0,
-        "presence_penalty":0.6  
+    response = {
+        "fulfillmentText": result
     }
-    header = {"Authorization": "Bearer " + os.getenv("OPENAI_API_KEY")}
 
-    res = requests.post('https://api.openai.com/v1/completions',
-    json = body, headers = header)
-    print('time elapsed',res.elapsed.total_seconds())
-    return res.json()
+    return jsonify(response)
 
-@app.get('/')
-def hello(request: Request):
-    print('server is live')
-    return {200: "API Running"}
+def google_search(query):
+    api_key = os.getenv('GOOGLE_API_KEY')
+    search_engine_id = os.getenv('SEARCH_ENGINE_ID')
+    url = f"https://www.googleapis.com/customsearch/v1?key={api_key}&cx={search_engine_id}&q={query}"
+    response = requests.get(url)
+    items = response.json().get('items', [])
+    if items:
+        return items[0]['snippet']
+    return "No results found."
 
-if __name__ == "__main__":
-    uvicorn.run(app, port=8000)
+def chatgpt_response(query):
+    openai.api_key = os.getenv('OPENAI_API_KEY')
+    response = openai.Completion.create(
+        engine="gpt-3.5-turbo",
+        prompt=query,
+        max_tokens=100
+    )
+    return response.choices[0].text.strip()
+
+@app.route('/', methods=['GET'])
+def index():
+    return "Flask app is running!"
+
+
+if __name__ == '__main__':
+    app.run(debug=True)
