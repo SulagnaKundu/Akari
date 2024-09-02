@@ -38,7 +38,7 @@ def chatgpt_response(query):
     response = openai.Completion.create(
         engine="gpt-3.5-turbo",
         prompt=query,
-        max_tokens=100
+        max_tokens=1000
     )
     return response.choices[0].text.strip()
 
